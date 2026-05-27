@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getFirestore } = require('firebase-admin/firestore');
 const cache = require('../lib/cache');
+const logger = require('../lib/logger');
 
 // Referral dashboard cache — 60s TTL per user.
 // Falls back to Firestore if Redis is not configured.
@@ -23,12 +24,18 @@ router.get('/', async (req, res) => {
     const db = getFirestore();
     const billingDocRef = db.collection('billing').doc(uid);
 
-    // OPTIMIZATION: Run billing read + referrals query in parallel
-    // BEFORE: billing read → wait → referrals query (sequential, 2x latency)
-    // AFTER:  both fire simultaneously, result arrives in ~1x latency
-    const [billingDoc, referralsSnapshot] = await Promise.all([
+    // OPTIMIZATION: Run billing read, limited referrals list, and efficient count query in parallel
+    const [billingDoc, referralsSnapshot, countSnapshot] = await Promise.all([
       billingDocRef.get(),
-      db.collection('referrals').where('referrer_uid', '==', uid).get()
+      db.collection('referrals')
+        .where('referrer_uid', '==', uid)
+        .limit(100)
+        .get(),
+      db.collection('referrals')
+        .where('referrer_uid', '==', uid)
+        .where('status', '==', 'success')
+        .count()
+        .get()
     ]);
 
     let billingData = {};
@@ -80,7 +87,7 @@ router.get('/', async (req, res) => {
     }
 
     const referrals = referralsSnapshot.docs.map(doc => doc.data());
-    const successfulCount = referrals.filter(r => r.status === 'success').length;
+    const successfulCount = countSnapshot.data().count;
 
     // Auto-unlock scratch card when milestone reached
     if (successfulCount >= 10 && billingData.scratchCardState === 'locked') {
@@ -103,7 +110,7 @@ router.get('/', async (req, res) => {
 
     res.json(responseData);
   } catch (error) {
-    console.error('Error fetching referral stats:', error);
+    logger.error('Error fetching referral stats:', { event: 'fetch_referral_stats_failed', error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch referral dashboard details' });
   }
 });
@@ -207,7 +214,7 @@ router.post('/claim', async (req, res) => {
 
     res.json({ success: true, reward: historyItem, newWalletBalance: newWallet });
   } catch (error) {
-    console.error('Error claiming referral reward:', error);
+    logger.error('Error claiming referral reward:', { event: 'claim_referral_reward_failed', rewardType, error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to process scratch card reward claim' });
   }
 });
@@ -277,7 +284,7 @@ router.post('/validate', async (req, res) => {
 
     res.json({ success: true, status, message });
   } catch (error) {
-    console.error('Error validating referral signup:', error);
+    logger.error('Error validating referral signup:', { event: 'validate_referral_failed', referralCode, deviceUuid, error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to validate referral signup' });
   }
 });
@@ -329,7 +336,7 @@ router.post('/click', async (req, res) => {
 
     res.json({ success: true, referredUsername: username, message: 'Pending referral registered successfully!' });
   } catch (error) {
-    console.error('Error tracking referral link click:', error);
+    logger.error('Error tracking referral link click:', { event: 'track_referral_click_failed', referralCode, error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to record pending referral click' });
   }
 });

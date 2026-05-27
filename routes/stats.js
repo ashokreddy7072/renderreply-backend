@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getFirestore } = require('firebase-admin/firestore');
 const cache = require('../lib/cache');
+const logger = require('../lib/logger');
 
 // Cache TTLs (seconds)
 // stats    — 60s.  User's dashboard numbers.
@@ -57,7 +58,7 @@ router.get('/', async (req, res) => {
 
     res.json(responseData);
   } catch (error) {
-    console.error('Error fetching stats:', error);
+    logger.error('Error fetching stats:', { event: 'fetch_stats_failed', error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
@@ -82,9 +83,37 @@ router.get('/sessions', async (req, res) => {
 
     const db = getFirestore();
 
-    const clientDevice   = req.query.device   || 'Mobile Device';
-    const clientLocation = req.query.location || 'Hyderabad, India';
-    const clientIp       = req.query.ip       || '172.20.10.1';
+    const clientDevice = req.query.device || 'Mobile Device';
+    
+    // Resolve client IP address on the backend securely
+    let clientIp = req.query.ip || req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    if (clientIp.includes(',')) {
+      clientIp = clientIp.split(',')[0].trim();
+    }
+    if (clientIp.startsWith('::ffff:')) {
+      clientIp = clientIp.substring(7);
+    }
+    if (clientIp === '::1' || clientIp === '127.0.0.1') {
+      clientIp = '103.44.112.18'; // Public Bangalore IP fallback for local development testing
+    }
+
+    // Resolve location securely using a server-side lookup API
+    let clientLocation = req.query.location;
+    if (!clientLocation) {
+      try {
+        const geoResponse = await fetch(`http://ip-api.com/json/${clientIp}?fields=status,country,city`)
+          .then(r => r.json())
+          .catch(() => null);
+        if (geoResponse && geoResponse.status === 'success' && geoResponse.city && geoResponse.country) {
+          clientLocation = `${geoResponse.city}, ${geoResponse.country}`;
+        } else {
+          clientLocation = 'Hyderabad, India';
+        }
+      } catch (err) {
+        logger.warn('Failed server-side session IP geolocation lookup. Falling back to default.', { event: 'geo_lookup_failed', ip: clientIp });
+        clientLocation = 'Hyderabad, India';
+      }
+    }
 
     const currentSessionId = `sess_current_${uid}`;
     const currentSession = {
@@ -160,7 +189,7 @@ router.get('/sessions', async (req, res) => {
 
     res.json(sessions);
   } catch (error) {
-    console.error('Error fetching sessions:', error);
+    logger.error('Error fetching sessions:', { event: 'fetch_sessions_failed', error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch active devices' });
   }
 });
@@ -208,7 +237,7 @@ router.post('/sessions/logout', async (req, res) => {
 
     res.json({ success: true, message: 'Session logged out successfully' });
   } catch (error) {
-    console.error('Error logging out session:', error);
+    logger.error('Error logging out session:', { event: 'logout_session_failed', sessionId, error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to log out session' });
   }
 });
@@ -284,7 +313,7 @@ router.get('/billing', async (req, res) => {
 
     res.json(billingData);
   } catch (error) {
-    console.error('Error fetching billing info:', error);
+    logger.error('Error fetching billing info:', { event: 'fetch_billing_failed', error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch billing details' });
   }
 });
@@ -352,7 +381,7 @@ router.post('/billing/upgrade', async (req, res) => {
 
     res.json({ success: true, message: `Successfully changed plan to ${plan}!` });
   } catch (error) {
-    console.error('Error upgrading subscription:', error);
+    logger.error('Error upgrading subscription:', { event: 'upgrade_subscription_failed', plan, error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to upgrade subscription' });
   }
 });
@@ -386,9 +415,70 @@ router.post('/billing/cancel', async (req, res) => {
 
     res.json({ success: true, message: 'Subscription cancelled successfully' });
   } catch (error) {
-    console.error('Error cancelling subscription:', error);
+    logger.error('Error cancelling subscription:', { event: 'cancel_subscription_failed', error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to cancel subscription' });
   }
 });
 
+// ---------------------------------------------------------------------------
+// POST /api/stats/delete-account  — Irreversibly delete account and purge data
+// ---------------------------------------------------------------------------
+router.post('/delete-account', async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const db = getFirestore();
+    const admin = require('firebase-admin');
+
+    logger.info(`Starting secure account erasure for user: ${uid}`, { event: 'account_deletion_started', userUid: uid });
+
+    // 1. Fetch matching docs in collections
+    const collections = ['social_connections', 'automations', 'user_sessions', 'referrals'];
+    const queries = [
+      db.collection('social_connections').where('user_uid', '==', uid),
+      db.collection('automations').where('user_uid', '==', uid),
+      db.collection('user_sessions').where('user_uid', '==', uid),
+      db.collection('referrals').where('referrer_uid', '==', uid)
+    ];
+
+    const snapshots = await Promise.all(queries.map(q => q.get()));
+
+    // 2. Commit batch deletes
+    const batch = db.batch();
+
+    // Add user's billing document and stats document to the batch delete
+    const billingRef = db.collection('billing').doc(uid);
+    const statsRef = db.collection('stats').doc(uid);
+    batch.delete(billingRef);
+    batch.delete(statsRef);
+
+    // Delete matching records in other collections
+    snapshots.forEach(snapshot => {
+      snapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+    });
+
+    await batch.commit();
+
+    // 3. Bust Redis Caches
+    await cache.del(
+      `stats_${uid}`,
+      `sessions_${uid}`,
+      `billing_${uid}`,
+      `referrals_${uid}`,
+      `automations_${uid}`
+    );
+
+    // 4. Delete user from Firebase Auth
+    await admin.auth().deleteUser(uid);
+
+    logger.info(`Successfully completed secure account erasure and deleted user: ${uid}`, { event: 'account_deletion_success', userUid: uid });
+    res.json({ success: true, message: 'Your RenderReply account and all associated data have been purged successfully.' });
+  } catch (error) {
+    logger.error('Error executing account deletion:', { event: 'account_deletion_failed', error: error.message, stack: error.stack });
+    res.status(500).json({ error: error.message || 'Failed to securely erase account' });
+  }
+});
+
 module.exports = router;
+

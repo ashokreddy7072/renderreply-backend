@@ -20,40 +20,46 @@
  *   Container 2: node worker.js     → This worker
  */
 
-require('dotenv').config();
+// --- 1. INITIALIZATION & ENV VALIDATION ---
+const config = require('./config/env');
+const logger = require('./lib/logger');
 const admin = require('firebase-admin');
 
-// --- 1. FIREBASE INIT ---
+// Initialize Firebase Admin strictly using env variable (no insecure file fallback)
 try {
-  const serviceAccount = require('./firebase-service-account.json');
-  if (serviceAccount.project_id === 'your-project-id') {
-    console.warn('⚠️ Using placeholder firebase-service-account.json. Worker will not function until replaced.');
-  } else {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log('✅ Worker: Firebase Admin initialized.');
-  }
+  admin.initializeApp({
+    credential: admin.credential.cert(config.firebaseServiceAccount)
+  });
+  logger.info('Worker: Firebase Admin initialized successfully from ENVs.', { event: 'firebase_initialized' });
 } catch (error) {
-  console.error("⚠️ Error initializing Firebase in worker:", error);
-  console.warn('⚠️ Worker: Could not load firebase-service-account.json.', error.message);
+  logger.fatal('Worker: Firebase Admin initialization failed. Exiting.', { event: 'firebase_init_failed', error: error.message });
+  process.exit(1);
 }
 
 // --- 2. START THE WORKER ---
 try {
   const startCommentPollWorker = require('./commentPollWorker');
   startCommentPollWorker();
-  console.log('🤖 Worker process is running independently. API server is unaffected.');
+  logger.info('🤖 Worker process is running independently. API server is unaffected.', { event: 'worker_started' });
 } catch (error) {
-  console.error('❌ Worker: Failed to start commentPollWorker:', error);
+  logger.error('❌ Worker: Failed to start commentPollWorker:', { event: 'worker_start_failed', error: error.message });
   process.exit(1);
 }
 
 // --- 3. GRACEFUL SHUTDOWN ---
 const shutdown = (signal) => {
-  console.log(`\n⚡ Worker received ${signal} — shutting down gracefully...`);
+  logger.info(`⚡ Worker received ${signal} — shutting down gracefully...`, { event: 'worker_shutdown', signal });
   process.exit(0);
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
+
+// Global crash prevention
+process.on('uncaughtException', (err) => {
+  logger.fatal('Uncaught Exception captured globally in worker.', { event: 'uncaught_exception', error: err.message, stack: err.stack });
+});
+process.on('unhandledRejection', (reason, promise) => {
+  logger.fatal('Unhandled Rejection captured globally in worker.', { event: 'unhandled_rejection', reason: String(reason) });
+});
+
