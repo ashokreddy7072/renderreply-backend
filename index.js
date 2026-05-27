@@ -8,19 +8,27 @@ const admin = require('firebase-admin');
 
 // --- 1. FIREBASE INIT ---
 try {
-  const serviceAccount = require('./firebase-service-account.json');
-  if (serviceAccount.project_id === "your-project-id") {
-    console.warn("⚠️ Using placeholder firebase-service-account.json. Firebase Auth will not work until you replace it with your real credentials.");
+  let serviceAccount;
+
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    // Production (Railway): read from env variable
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
   } else {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log("Firebase Admin initialized.");
+    // Local dev: read from file
+    serviceAccount = require('./firebase-service-account.json');
+  }
+
+  if (!serviceAccount || serviceAccount.project_id === 'your-project-id') {
+    console.warn('⚠️ Using placeholder Firebase credentials. Firebase Auth will not work.');
+  } else {
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    console.log('✅ Firebase Admin initialized.');
   }
 } catch (error) {
-  console.error("⚠️ Error initializing Firebase:", error);
-  console.warn("⚠️ Could not load firebase-service-account.json. Please add it to the root of the backend folder.");
+  console.error('⚠️ Error initializing Firebase:', error);
+  console.warn('⚠️ Could not load Firebase credentials. Set FIREBASE_SERVICE_ACCOUNT_JSON env variable in Railway.');
 }
+
 const app = express();
 
 // --- 3. PRODUCTION MIDDLEWARE (SCALE & SECURE) ---
@@ -40,10 +48,10 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
 app.use(cors({
   origin: ALLOWED_ORIGINS
     ? (origin, callback) => {
-        // Allow server-to-server calls (no origin header) and listed origins
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-        return callback(new Error(`CORS: origin '${origin}' not allowed`));
-      }
+      // Allow server-to-server calls (no origin header) and listed origins
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+      return callback(new Error(`CORS: origin '${origin}' not allowed`));
+    }
     : '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -101,9 +109,9 @@ app.get('/api/health', (req, res) => res.json({ status: 'Backend is healthy and 
 // Frontend calls this once on startup instead of reading from its own .env.
 app.get('/api/config', (req, res) => {
   res.json({
-    metaAppId:    process.env.META_APP_ID,
-    redirectUri:  process.env.META_REDIRECT_URI,
-    metaScope:    'instagram_basic,instagram_manage_comments,instagram_manage_insights,pages_show_list,pages_read_engagement',
+    metaAppId: process.env.META_APP_ID,
+    redirectUri: process.env.META_REDIRECT_URI,
+    metaScope: 'instagram_basic,instagram_manage_comments,instagram_manage_insights,pages_show_list,pages_read_engagement',
   });
 });
 
