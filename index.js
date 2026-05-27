@@ -1,4 +1,5 @@
 // --- 1. INITIALIZATION & ENV VALIDATION ---
+require('./lib/sentry');
 const config = require('./config/env');
 const logger = require('./lib/logger');
 const express = require('express');
@@ -286,11 +287,15 @@ const statsRoutes = require('./routes/stats');
 const automationsRoutes = require('./routes/automations');
 const socialRoutes = require('./routes/social');
 const referralsRoutes = require('./routes/referrals');
+const billingRoutes = require('./routes/billing');
+const webhooksRoutes = require('./routes/webhooks');
 
 app.use('/api/stats', verifyToken, statsRoutes);
 app.use('/api/automations', verifyToken, automationsRoutes);
 app.use('/api/social', verifyToken, socialRoutes);
 app.use('/api/referrals', verifyToken, referralsRoutes);
+app.use('/api/billing', verifyToken, billingRoutes);
+app.use('/api/webhooks', webhooksRoutes);
 
 // --- 6. HEALTH & ENVIRONMENT MONITORING ENDPOINT ---
 app.get('/api/health', async (req, res) => {
@@ -374,6 +379,9 @@ app.get('/api/config', (req, res) => {
 
 
 // --- 7. GLOBAL ERROR HANDLER ---
+const Sentry = require('./lib/sentry');
+Sentry.setupExpressErrorHandler(app);
+
 app.use((err, req, res, next) => {
   const isDev = config.nodeEnv === 'development';
   logger.error('Unhandled Server Exception occurred.', {

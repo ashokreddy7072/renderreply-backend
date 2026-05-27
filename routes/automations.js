@@ -60,7 +60,11 @@ router.post('/', async (req, res) => {
       link2_text,
       link2_url,
       link3_text,
-      link3_url
+      link3_text,
+      link3_url,
+      instagram_media_id,
+      media_title,
+      media_thumbnail
     } = req.body;
 
     if (!type || !name) {
@@ -91,6 +95,9 @@ router.post('/', async (req, res) => {
       link2_url: link2_url || '',
       link3_text: link3_text || '',
       link3_url: link3_url || '',
+      instagram_media_id: instagram_media_id || null,
+      media_title: media_title || '',
+      media_thumbnail: media_thumbnail || null,
       created_at: new Date().toISOString()
     };
 
@@ -168,7 +175,10 @@ router.put('/:id', async (req, res) => {
       link2_text,
       link2_url,
       link3_text,
-      link3_url
+      link3_url,
+      instagram_media_id,
+      media_title,
+      media_thumbnail
     } = req.body;
 
     const updates = {};
@@ -191,6 +201,9 @@ router.put('/:id', async (req, res) => {
     if (link2_url !== undefined) updates.link2_url = link2_url;
     if (link3_text !== undefined) updates.link3_text = link3_text;
     if (link3_url !== undefined) updates.link3_url = link3_url;
+    if (instagram_media_id !== undefined) updates.instagram_media_id = instagram_media_id;
+    if (media_title !== undefined) updates.media_title = media_title;
+    if (media_thumbnail !== undefined) updates.media_thumbnail = media_thumbnail;
     updates.updated_at = new Date().toISOString();
 
     await docRef.update(updates);

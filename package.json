@@ -15,6 +15,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@sentry/node": "^10.54.0",
+    "bullmq": "^5.77.6",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -23,6 +25,7 @@
     "helmet": "^8.1.0",
     "ioredis": "^5.11.0",
     "nodemon": "^3.1.14",
-    "pm2": "^7.0.1"
+    "pm2": "^7.0.1",
+    "razorpay": "^2.9.6"
   }
 }

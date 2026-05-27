@@ -21,6 +21,7 @@
  */
 
 // --- 1. INITIALIZATION & ENV VALIDATION ---
+require('./lib/sentry');
 const config = require('./config/env');
 const logger = require('./lib/logger');
 const admin = require('firebase-admin');
@@ -37,18 +38,28 @@ try {
 }
 
 // --- 2. START THE WORKER ---
+let shutdownWorkerFn = null;
+
 try {
-  const startCommentPollWorker = require('./commentPollWorker');
-  startCommentPollWorker();
-  logger.info('🤖 Worker process is running independently. API server is unaffected.', { event: 'worker_started' });
+  const { startCommentConsumerWorker, shutdownWorker } = require('./workers/commentConsumer');
+  shutdownWorkerFn = shutdownWorker;
+  startCommentConsumerWorker();
+  logger.info('🤖 BullMQ Worker process is running independently. API server is unaffected.', { event: 'worker_started' });
 } catch (error) {
-  logger.error('❌ Worker: Failed to start commentPollWorker:', { event: 'worker_start_failed', error: error.message });
+  logger.error('❌ Worker: Failed to start comment consumer worker:', { event: 'worker_start_failed', error: error.message });
   process.exit(1);
 }
 
 // --- 3. GRACEFUL SHUTDOWN ---
-const shutdown = (signal) => {
+const shutdown = async (signal) => {
   logger.info(`⚡ Worker received ${signal} — shutting down gracefully...`, { event: 'worker_shutdown', signal });
+  if (shutdownWorkerFn) {
+    try {
+      await shutdownWorkerFn();
+    } catch (err) {
+      logger.error('Error closing worker on shutdown:', { event: 'worker_shutdown_error', error: err.message });
+    }
+  }
   process.exit(0);
 };
 
