@@ -24,6 +24,9 @@ try {
 const app = express();
 
 // --- 3. PRODUCTION MIDDLEWARE (SCALE & SECURE) ---
+// Enable trust proxy so rate limiting works correctly behind Render's load balancer
+app.set('trust proxy', 1);
+
 // Secure HTTP headers
 app.use(helmet());
 
