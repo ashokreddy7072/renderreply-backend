@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+
+  # ─────────────────────────────────────────
+  # Service 1: API Server
+  # Handles all user requests from the app.
+  # Scales up automatically when traffic increases.
+  # ─────────────────────────────────────────
+  api:
+    build: .
+    container_name: renderreply-api
+    restart: always
+    ports:
+      - "3000:3000"
+    command: ["node", "index.js"]
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+
+  # ─────────────────────────────────────────
+  # Service 2: Background Worker
+  # Polls Instagram comments every 60 seconds.
+  # Runs independently — never slows down the API.
+  # ─────────────────────────────────────────
+  worker:
+    build: .
+    container_name: renderreply-worker
+    restart: always
+    command: ["node", "worker.js"]
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    # Worker does not expose any port — it only does background work
