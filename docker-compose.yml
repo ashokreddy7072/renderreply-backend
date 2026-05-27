@@ -19,6 +19,8 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+    volumes:
+      - ./firebase-service-account.json:/usr/src/app/firebase-service-account.json:ro
 
   # ─────────────────────────────────────────
   # Service 2: Background Worker
@@ -34,4 +36,6 @@ services:
       - .env
     environment:
       - NODE_ENV=production
+    volumes:
+      - ./firebase-service-account.json:/usr/src/app/firebase-service-account.json:ro
     # Worker does not expose any port — it only does background work

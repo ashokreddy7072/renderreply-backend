@@ -35,6 +35,7 @@ try {
     console.log('✅ Worker: Firebase Admin initialized.');
   }
 } catch (error) {
+  console.error("⚠️ Error initializing Firebase in worker:", error);
   console.warn('⚠️ Worker: Could not load firebase-service-account.json.', error.message);
 }
 

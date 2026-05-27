@@ -18,6 +18,7 @@ try {
     console.log("Firebase Admin initialized.");
   }
 } catch (error) {
+  console.error("⚠️ Error initializing Firebase:", error);
   console.warn("⚠️ Could not load firebase-service-account.json. Please add it to the root of the backend folder.");
 }
 const app = express();
